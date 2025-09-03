@@ -1,0 +1,192 @@
+//Trainingsdata
+var trainingPointsPre = ee.FeatureCollection('users/skrohne/trainingPointsVegetationPre');
+var trainingPointsPost = ee.FeatureCollection('users/skrohne/trainingPointsAgrarPost');
+
+// Load your AOI
+var region = table; 
+
+// Inputdaten
+var compositePre = image2;
+var compositePost = image;
+
+
+// === Preparing Sentinel 2 data  ===
+
+//Calculate NDVI
+function calculateNDVI(image) {
+  return image.normalizedDifference(['B8', 'B4']).rename('NDVI');
+}
+//Calculate SAVI
+function calculateSAVI(image) {
+  return image.expression(
+    '((NIR - RED) / (NIR + RED + L)) * (1 + L)', {
+      'NIR': image.select('B8'),
+      'RED': image.select('B4'),
+      'L': 0.5
+    }).rename('SAVI');
+}
+//Calculate EVI
+function calculateEVI(image) {
+  return image.expression(
+    '2.5 * ((NIR - RED) / (NIR + 6 * RED - 7.5 * BLUE + 1))', {
+      'NIR': image.select('B8'),
+      'RED': image.select('B4'),
+      'BLUE': image.select('B2')
+    }).rename('EVI');
+}
+//Calculate MIRBI
+function calculateMIRBI(image) {
+  return image.expression(
+    '10 * SWIR1 - 9.8 * SWIR2 + 2', {
+      'SWIR1': image.select('B11'),
+      'SWIR2': image.select('B12')
+    }).rename('MIRBI');
+}
+//Calculate BAI
+function calculateBAI(image) {
+  return image.expression(
+    '1 / ((0.1 - NIR)**2 + (0.06 - RED)**2)', {
+      'NIR': image.select('B8'),
+      'RED': image.select('B4')
+    }).rename('BAI');
+}
+//Calculate BAIS2
+function calculateBAIS2(image) {
+  return image.expression(
+    '(1 - sqrt((B6 * B7 * B8A) / B4)) * ((B12 - B8A) / sqrt(B12 + B8A) + 1)', {
+      'B4': image.select('B4'),
+      'B6': image.select('B6'),
+      'B7': image.select('B7'),
+      'B8A': image.select('B8A'),
+      'B12': image.select('B12')
+    }).rename('BAIS2');
+}
+//Calculate NBR
+function calculateNBR(image) {
+  return image.normalizedDifference(['B8', 'B12']).rename('NBR');
+}
+
+//Function to get pre, post, and delta indices
+function getIndexTriplet(calcFunc, preImage, postImage, indexName) {
+  var pre = calcFunc(preImage);
+  var post = calcFunc(postImage);
+  var delta = post.subtract(pre).rename('d' + indexName);
+  return {pre: pre, post: post, delta: delta};
+}
+// Generate all indices
+var NDVI = getIndexTriplet(calculateNDVI, compositePre, compositePost, 'NDVI');
+var SAVI = getIndexTriplet(calculateSAVI, compositePre, compositePost, 'SAVI');
+var EVI = getIndexTriplet(calculateEVI, compositePre, compositePost, 'EVI');
+var MIRBI = getIndexTriplet(calculateMIRBI, compositePre, compositePost, 'MIRBI');
+var BAI = getIndexTriplet(calculateBAI, compositePre, compositePost, 'BAI');
+var BAIS2 = getIndexTriplet(calculateBAIS2, compositePre, compositePost, 'BAIS2');
+var NBR = getIndexTriplet(calculateNBR, compositePre, compositePost, 'NBR');
+
+
+//Build Feature Stack PRE
+var featureStackPre = compositePre.select([
+    'B2', 'B3', 'B4', 'B5', 'B6', 'B7', 'B8', 'B8A', 'B11', 'B12'
+  ])
+  .addBands(EVI.pre.rename('EVI'))
+  .addBands(SAVI.pre.rename('SAVI'))
+  .addBands(MIRBI.pre.rename('MIRBI'))
+  .addBands(BAIS2.pre.rename('BAIS2'))
+  .addBands(NBR.pre.rename('NBR'));
+//Build Feature Stack Post
+var featureStackPost = compositePost.select([
+    'B2', 'B4', 'B5', 'B6', 'B7', 'B8A', 'B11', 'B12'
+  ])
+  .addBands(NDVI.delta.rename('NDVI'))
+  .addBands(EVI.delta.rename('EVI'))
+  .addBands(SAVI.delta.rename('SAVI'))
+  .addBands(MIRBI.delta.rename('MIRBI'))
+  .addBands(BAI.delta.rename('BAI'))
+  .addBands(BAIS2.delta.rename('BAIS2'))
+  .addBands(NBR.delta.rename('NBR'));
+
+//Check feature stack post
+print('FeatureStackPost:', featureStackPost);
+
+// === Classification ===
+
+function trainClassifier(image, trainingData, classProperty, numTrees) {
+var training = image.sampleRegions({
+ collection: trainingData,
+ properties: [classProperty],
+ scale: 10
+});
+ var classifier = ee.Classifier.smileRandomForest(numTrees)
+.train({
+ features: training,
+ classProperty: classProperty
+ });
+ return classifier;
+ }
+function classifyImage(image, classifier, validationData, classProperty) {
+var classified = image.classify(classifier);
+ var validation = classified.sampleRegions({
+    collection: validationData,
+ properties: [classProperty],
+ scale: 10, 
+ tileScale: 8
+ });
+ var errorMatrix = validation.errorMatrix({
+ actual: classProperty,
+ predicted: 'classification'
+ });
+ return {
+ classified: classified,
+ errorMatrix: errorMatrix
+ };
+ }
+ 
+// Parameter
+var numTrees = 100;
+var classProperty = 'class';
+
+// Function: Train + Classify + Validate + Feature Importance
+function runClassification(trainingPoints, featureStack, numClasses, palette, label) {
+  var withRandom = trainingPoints.randomColumn('random');
+  var trainingData = withRandom.filter(ee.Filter.lt('random', 0.7));
+  var validationData = withRandom.filter(ee.Filter.gte('random', 0.7));
+  
+  var classifier = trainClassifier(featureStack, trainingData, classProperty, numTrees);
+  var results = classifyImage(featureStack, classifier, validationData, classProperty);
+  
+  // Add classified map
+  Map.addLayer(results.classified, {min: 0, max: numClasses - 1, palette: palette}, 'RF Classification ' + label);
+  
+  // Accuracy
+  print('Error Matrix ' + label + ':', results.errorMatrix);
+  print('Overall Accuracy ' + label + ':', results.errorMatrix.accuracy());
+  print('Kappa Index ' + label + ':', results.errorMatrix.kappa());
+  print('User Accuracy' + label + ':' , results.errorMatrix.consumersAccuracy());
+  print('Producers Accuracy' + label + ':' , results.errorMatrix.producersAccuracy()); 
+  // Feature importance
+  var importance = ee.Dictionary(classifier.explain().get('importance'));
+  var total = importance.values().reduce(ee.Reducer.sum());
+  var importancePercent = importance.map(function(key, value) {
+    return ee.Number(value).divide(total).multiply(100);
+  });
+  print('Feature Importance in % (' + label + ')', importancePercent);
+  
+  return results;
+}
+
+// === Run PRE ===
+var resultsPre = runClassification(
+  trainingPointsPre,
+  featureStackPre,
+  3,
+  ['red', 'green', 'blue'],
+  'PRE'
+);
+
+// === Run POST ===
+var resultsPost = runClassification(
+  trainingPointsPost,
+  featureStackPost,
+  4,
+  ['red', 'green', 'blue', 'yellow'],
+  'POST'
+);

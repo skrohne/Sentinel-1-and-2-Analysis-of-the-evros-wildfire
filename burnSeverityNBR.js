@@ -1,63 +1,16 @@
 // Load your AOI
 var aoi = table; 
 
-// === Cloud Masking Function for Sentinel-2  ===
-function maskS2clouds(image) {
-  var qa = image.select('QA60');
-  var cloudBitMask = 1 << 10;  // Bit 10: clouds
-  var cirrusBitMask = 1 << 11; // Bit 11: cirrus
+// Load your composites
+var compositePre  = image; 
+var compositePost = image2; 
 
-  // Mask where both bits are 0 (clear)
-  var cloudMask = qa.bitwiseAnd(cloudBitMask).eq(0)
-                   .and(qa.bitwiseAnd(cirrusBitMask).eq(0));
-
-  // Apply mask and scale reflectance to [0,1]
-  return image.updateMask(cloudMask).divide(10000)
-              .copyProperties(image, ["system:time_start"]);
-}
-
-// === Water Mask Function ===
-var gsw = ee.Image('JRC/GSW1_4/GlobalSurfaceWater');
-var occurrence = gsw.select('occurrence');
-var permanentWater = occurrence.gt(50).unmask(0);
-var landMask = permanentWater.not();
-
-function maskWater(image) {
-  return image.updateMask(landMask);
-}
-
-// === Load and Filter Sentinel-2 Imagery (Pre-Fire) ===
-var s2pre = ee.ImageCollection('COPERNICUS/S2_SR_HARMONIZED')
-  .filterDate('2023-07-25', '2023-08-01')
-  .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 5))
-  .map(maskS2clouds)
-  .map(maskWater);
-
-// === Load and Filter Sentinel-2 Imagery (Post-Fire) ===
-var s2post = ee.ImageCollection('COPERNICUS/S2_SR_HARMONIZED')
-  .filterDate('2023-09-01', '2023-09-30')
-  .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 5))
-  .map(maskS2clouds)
-  .map(maskWater);
-
-// === Load and Filter Sentinel-2 Imagery (Summer) ===
-var s2summer = ee.ImageCollection('COPERNICUS/S2_SR_HARMONIZED')
-  .filterDate('2024-07-25', '2024-08-01')
-  .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 5))
-  .map(maskS2clouds)
-  .map(maskWater);
-
-// === Composite Generation ===
-var compositePre = s2pre.mean().clip(aoi); 
-var compositePost = s2post.mean().clip(aoi);
-var compositeSummer = s2summer.mean().clip(aoi);
-
-// === Function to calculate NBR ===
+// Function to calculate NBR
 function computeNBR(image) {
   return image
     .normalizedDifference(['B8', 'B12']) // NBR = (NIR - SWIR2) / (NIR + SWIR2)
 }
-// === Calculate NBR for pre-fire and post-fire ===
+// Calculate NBR for pre-fire and post-fire
 var preNBR = computeNBR(compositePre);
 var postNBR = computeNBR(compositePost);
 
@@ -229,17 +182,5 @@ Export.image.toDrive({
   region: aoi,
   scale: 10,
   maxPixels: 1e13
-});
-
-// Convert client-side list to server-side FeatureCollection
-var fc = ee.FeatureCollection(arealist.map(function(d) {
-  return ee.Feature(null, d);
-}));
-
-// Export to Drive as CSV
-Export.table.toDrive({
-  collection: fc,
-  description: 'burned_area_by_class',
-  fileFormat: 'CSV'
 });
 */

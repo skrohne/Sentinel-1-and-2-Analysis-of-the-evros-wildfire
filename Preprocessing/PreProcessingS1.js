@@ -7,13 +7,13 @@ var preFireEnd = '2023-08-20';
 var postFireStart = '2023-09-01';
 var postFireEnd = '2023-09-20';
 
-// --- Water Mask ---
+// Water Mask
 var gsw = ee.Image('JRC/GSW1_0/GlobalSurfaceWater');
 var occurrence = gsw.select('occurrence');
 var permanentWater = occurrence.gt(50).unmask(0);
 var landMask = permanentWater.not();
 
-// --- Lee Filter ---
+// Lee Filter
 function leeFilter(image, kernelSize) {
   var bandNames = image.bandNames().remove('angle');
   var enl = 5;
@@ -46,7 +46,7 @@ function leeFilter(image, kernelSize) {
   return image.addBands(output, null, true);
 }
 
-// ---- Calculation of Gamma0 with and without lee filter ----
+// Calculation of Gamma0 with and without lee filter
 function prepareS1(image) {
   //select VV, VH
   var vv = image.select('VV');
@@ -96,7 +96,6 @@ var preMedian = sentinel1Pre.median().updateMask(landMask).clip(aoi);
 var postMedian = sentinel1Post.median().updateMask(landMask).clip(aoi);
 
 //Export to Asset 
-
 Export.image.toAsset({
   image: preMedian,
   description: 'Sentinel1_Composite_Pre_Fire',

@@ -1,7 +1,7 @@
 // Load your AOI
 var aoi = table; 
 
-// === Cloud Masking Function for Sentinel-2  ===
+// Cloud Masking Function for Sentinel-2
 function maskS2clouds(image) {
   var qa = image.select('QA60');
   var cloudBitMask = 1 << 10;  // Bit 10: clouds
@@ -16,7 +16,7 @@ function maskS2clouds(image) {
               .copyProperties(image, ["system:time_start"]);
 }
 
-// === Water Mask Function ===
+// Water Mask Function
 var gsw = ee.Image('JRC/GSW1_4/GlobalSurfaceWater');
 var occurrence = gsw.select('occurrence');
 var permanentWater = occurrence.gt(50).unmask(0);
@@ -26,40 +26,40 @@ function maskWater(image) {
   return image.updateMask(landMask);
 }
 
-// === Load and Filter Sentinel-2 Imagery (Pre-Fire) ===
+// Load and Filter Sentinel-2 Imagery (Pre-Fire)
 var s2pre = ee.ImageCollection('COPERNICUS/S2_SR_HARMONIZED')
   .filterDate('2023-07-25', '2023-08-01')
   .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 5))
   .map(maskS2clouds)
   .map(maskWater);
 
-// === Load and Filter Sentinel-2 Imagery (Post-Fire) ===
+// Load and Filter Sentinel-2 Imagery (Post-Fire)
 var s2post = ee.ImageCollection('COPERNICUS/S2_SR_HARMONIZED')
   .filterDate('2023-09-01', '2023-09-30')
   .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 5))
   .map(maskS2clouds)
   .map(maskWater);
 
-// === Load and Filter Sentinel-2 Imagery (Summer) ===
+// Load and Filter Sentinel-2 Imagery (Summer)
 var s2summer = ee.ImageCollection('COPERNICUS/S2_SR_HARMONIZED')
   .filterDate('2024-07-25', '2024-08-01')
   .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 5))
   .map(maskS2clouds)
   .map(maskWater);
 
-// === Composite Generation ===
+// Composite Generation
 var compositePre = s2pre.mean().clip(aoi); 
 var compositePost = s2post.mean().clip(aoi);
 var compositeSummer = s2summer.mean().clip(aoi);
 
-// === Visualization Parameters ===
+// Visualization Parameters
 var visParams = {
   min: 0.0,
   max: 0.3,
   bands: ['B4', 'B3', 'B2'], // RGB
 };
 
-// === Display ===
+// Display
 Map.centerObject(table, 9);
 Map.addLayer(compositePre, visParams, 'Composite Pre-Fire');
 Map.addLayer(compositePost, visParams, 'Composite Post-Fire');
@@ -67,7 +67,6 @@ Map.addLayer(compositeSummer, visParams, 'Composite Summer');
 
 
 //Export to Asset 
-
 Export.image.toAsset({
   image: compositePre,
   description: 'Sentinel2_RGB_Composite_Pre_Fire',
